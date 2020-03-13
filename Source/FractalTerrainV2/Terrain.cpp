@@ -100,6 +100,7 @@ ATerrain::ATerrain(){
 bool ATerrain::Raycast(const FVector& start, const FVector& end, FIntVector& blockCoords, FVector &impactCoords) {
 	bool found = false;
 	struct FHitResult hitResult;
+	//TODO: Fix this, as intersection may not be the closest
 	for (auto& entry : m_chunks) {
 		UProceduralMeshComponent* mesh = entry.Value;
 		struct FHitResult tempHitRes;
