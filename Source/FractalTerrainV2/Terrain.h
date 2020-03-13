@@ -41,17 +41,32 @@ public:
 	// Sets default values for this actor's properties
 	ATerrain();
 
+	/*
+		Performs collision testing on the terrain
+	*/
 	UFUNCTION(BlueprintCallable, Category = "Terrain")
 	bool Raycast(const FVector& start, const FVector& end, FIntVector& blockCoords, FVector &coords);
 
+	/*
+		Pops a block from the terrain and remesh
+	*/
 	UFUNCTION(BlueprintCallable, Category = "Terrain")
 	float PopBlock(const FIntVector &coords);
 
+	/*
+		Returns the block type at given coordinates
+	*/
 	UFUNCTION(BlueprintCallable, Category = "Terrain")
 	int GetBlockType(const FIntVector& coord);
 
+	/*
+		Returns chunk index at given chunk coordinates
+	*/
 	int64 getChunkIndex(short x, short y, short z) const;
 
+	/*
+		Get back chunk coordinates from index
+	*/
 	FIntVector getChunkCoords(int64 index) const {
 		return FIntVector(
 			(short)(index & 0xFFFF),
@@ -59,6 +74,9 @@ public:
 			(short)((index >> 32)));
 	};
 
+	/*
+		Given world coordinates, translates them to chunk coordinates.
+	*/
 	FIntVector worldToChunkCoords(float x, float y, float z) const {
 		return FIntVector(
 			std::floor(x / m_chunkWorldSize),
@@ -69,6 +87,9 @@ public:
 	void preloadChunk(int64 index);
 	void loadChunk(int64 index);
 
+	/*
+		Returns the world coordinate in the middle of the block given face.
+	*/
 	FVector getBlockSideCoord(FIntVector block, Side side = TOP) const {
 		const float halfSize = VoxelSize / 2.0;
 		FVector coord(block * VoxelSize);

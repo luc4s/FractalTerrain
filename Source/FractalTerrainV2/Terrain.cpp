@@ -129,13 +129,13 @@ bool ATerrain::Raycast(const FVector& start, const FVector& end, FIntVector& blo
 float ATerrain::PopBlock(const FIntVector& coord) {
 	openvdb::Coord voxel(coord.X, coord.Y, coord.Z);
 
-	//UE_LOG(LogTemp, Warning, TEXT("HIT: %s (%s)"), *impact.ToString(), *hitResult.Normal.ToString());
-
-	// Dessine le bloc de débogage
+	// Draw debug block
+	/*
 	const FVector center = FVector(voxel.x(), voxel.y(), voxel.z()) * VoxelSize + FVector(VoxelSize / 2.0);
 	const FVector extent = FVector(VoxelSize / 2.0) * 1.1;
-	//FlushPersistentDebugLines(GetWorld());
-	//DrawDebugBox(GetWorld(), center, extent, FColor(255, 0, 0), false, 3);
+	FlushPersistentDebugLines(GetWorld());
+	DrawDebugBox(GetWorld(), center, extent, FColor(255, 0, 0), false, 3);
+	//*/
 
 	openvdb::FloatGrid::Accessor accessor = m_grid->getAccessor();
 	const float voxelType = accessor.getValue(voxel);
@@ -150,7 +150,6 @@ float ATerrain::PopBlock(const FIntVector& coord) {
 		voxel.offsetBy(-1, 0, 0),
 	};
 
-	//UE_LOG(LogTemp, Warning, TEXT("%d %d %d"), coord.X, coord.Y, coord.Z);
 	const int64 chunkId = getChunkIndex(
 		std::floor(coord.X / ChunkSize),
 		std::floor(coord.Y / ChunkSize),
@@ -212,10 +211,10 @@ void ATerrain::BeginPlay()
 	openvdb::FloatGrid::Ptr grid = m_grid;
 
 	TBigInt<64> idx(getChunkIndex(0, 0, -1));
-	//UE_LOG(LogTemp, Warning, TEXT("=> %lld"), *idx.ToString());
 	const short range = DbgChunkLoadRange;
 	const short preloadRange = range + 1;
-	//*
+
+	// Preload some chunks around starting zone
 	for (short i = -preloadRange; i < preloadRange; ++i) {
 		for (short j = -preloadRange; j < preloadRange; ++j) {
 			for (short k = -preloadRange; k < preloadRange; ++k) {
@@ -232,7 +231,6 @@ void ATerrain::BeginPlay()
 			}
 		}
 	}
-	//*/
 
 	RootComponent->SetRelativeScale3D(FVector(VoxelSize));
 
@@ -281,13 +279,10 @@ void ATerrain::preloadChunk(int64 index) {
 	const openvdb::Coord chunkSample(chunkVoxel.X, chunkVoxel.Y, chunkVoxel.Z);
 
 	const float value = accessor.getValue(chunkSample);
-	//UE_LOG(LogTemp, Warning, TEXT("%s = %f"), *chunkVoxel.ToString(), value);
 	if (value == 0) {
 		const FVector center = VoxelSize * (FVector(chunkVoxel.X, chunkVoxel.Y, chunkVoxel.Z) + FVector(ChunkSize / 2.0));
 		const FVector extent = VoxelSize * FVector(ChunkSize / 2.0) * 0.9;
-		//DrawDebugBox(GetWorld(), center, extent, FColor(255, 255, 0), true);
 
-		//UE_LOG(LogTemp, Warning, TEXT("Generate chunk [%s]"), *chunkCoords.ToString());
 		// Compute fractal (generate noise)
 		const int size = static_cast<int>(ChunkSize);
 
@@ -300,7 +295,6 @@ void ATerrain::preloadChunk(int64 index) {
 		// First fill with air
 		const openvdb::CoordBBox chunk(Ox, Oy, Oz, chkWidth, chkDepth, chkHeight);
 		m_grid->fill(chunk, 1.0, false);
-		//UE_LOG(LogTemp, Log, TEXT("FILL WITH AIR %d %d %d %d"), Ox, Oy, Oz, size - 1);
 
 		for (int i = Ox; i <= chkWidth; ++i) {
 			for (int j = Oy; j <= chkDepth; ++j) {
@@ -328,9 +322,9 @@ void ATerrain::preloadChunk(int64 index) {
 		// Optimize grid sparseness
 		m_grid->pruneGrid();
 	}
-	else {
+	else
 		UE_LOG(LogTemp, Warning, TEXT("Chunk at %s already generated"), *chunkCoords.ToString());
-	}
+
 
 	// Create mesh
 	UProceduralMeshComponent* mesh = NewObject<UProceduralMeshComponent>(this);
@@ -341,13 +335,10 @@ void ATerrain::preloadChunk(int64 index) {
 	}
 
 	const FVector chunkLocation = FVector(chunkVoxel.X, chunkVoxel.Y, chunkVoxel.Z) / 2;
-	//UE_LOG(LogTemp, Warning, TEXT("%s"), *chunkLocation.ToString());
+
 	mesh->bUseComplexAsSimpleCollision = true;
-	//mesh->SetRelativeLocation(chunkLocation);
 	mesh->AttachToComponent(RootComponent, FAttachmentTransformRules::KeepRelativeTransform);
 	m_chunks.Add(index, mesh);
-	//UE_LOG(LogTemp, Warning, TEXT("%lld added to chunks"), index);
-	//UE_LOG(LogTemp, Warning, TEXT("Chunk loc: %s"), *chunkLocation.ToString());
 }
 
 void ATerrain::loadChunk(int64 index) {
@@ -369,13 +360,11 @@ void ATerrain::loadChunk(int64 index) {
 
 	const int size = static_cast<int>(ChunkSize);
 	const openvdb::CoordBBox chunk(Ox, Oy, Oz, Ox + size - 1, Oy + size - 1, Oz + size - 1);
-	//UE_LOG(LogTemp, Warning, TEXT("%d %d %d"), Ox, Oy, Oz);
 
 	UProceduralMeshComponent* mesh = m_chunks[index];
 
 	processChunk(chunk, vertices, triangles, normals, 2);
 	mesh->CreateMeshSection_LinearColor(0, vertices, triangles, normals, uv, colors, tangents, true);
-
 
 	processChunk(chunk, vertices, triangles, normals, 3);
 	mesh->CreateMeshSection_LinearColor(1, vertices, triangles, normals, uv, colors, tangents, true);
@@ -387,7 +376,6 @@ void ATerrain::loadChunk(int64 index) {
 void ATerrain::processChunk(const openvdb::CoordBBox& bbox, TArray<FVector>& vertices, TArray<int32>& triangles, TArray<FVector>& normals, int voxelType) {
 	openvdb::FloatGrid::Accessor accessor = m_grid->getAccessor();
 
-	//int c = 0;
 	for (openvdb::CoordBBox::ZYXIterator it = bbox.beginZYX(); it; ++it) {
 		const openvdb::Coord coord = *it;
 		const float value = accessor.getValue(coord);
@@ -405,7 +393,6 @@ void ATerrain::processChunk(const openvdb::CoordBBox& bbox, TArray<FVector>& ver
 		const bool pz = 1 == accessor.getValue(coord.offsetBy(0, 0, 1));
 
 		if (nx || px || ny || py || nz || pz) {
-			//++c;
 			// Create faces
 			if (nx) AddFace(0, coord.asPointer(), vertices, triangles, normals);
 			if (px) AddFace(1, coord.asPointer(), vertices, triangles, normals);
@@ -417,5 +404,4 @@ void ATerrain::processChunk(const openvdb::CoordBBox& bbox, TArray<FVector>& ver
 			if (pz) AddFace(5, coord.asPointer(), vertices, triangles, normals);
 		}
 	}
-	//UE_LOG(LogTemp, Warning, TEXT("%d found"), c);
 }
