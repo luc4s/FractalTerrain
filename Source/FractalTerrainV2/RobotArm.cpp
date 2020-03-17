@@ -9,7 +9,7 @@
 #include <cmath>
 
 // Sets default values
-ARobotArm::ARobotArm() : Src(NULL), Dst(NULL)
+ARobotArm::ARobotArm() : Src(NULL), Dst(NULL), CurrentNode(0)
 {
  	// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
@@ -28,7 +28,7 @@ void ARobotArm::Tick(float DeltaTime) {
 }
 
 void ARobotArm::SetSettingUp(bool value) {
-	GetBones(BoneIndices, BoneAxes);
+	GetBones(BoneIndices);
 	AMyCharacter* character = Cast<AMyCharacter>(
 		UGameplayStatics::GetPlayerCharacter(GetWorld(), 0));
 	character->SetActionMode(-1);
@@ -36,99 +36,116 @@ void ARobotArm::SetSettingUp(bool value) {
 }
 
 void ARobotArm::OnSelect(AActor *selected) {
-	UE_LOG(LogTemp, Warning, TEXT("Selected: %s"), *AActor::GetDebugName(selected));
+	if (!selected->ActorHasTag("Belt"))
+		return;
+
+	FVector target = selected->GetActorLocation();
+	FRotator orientation = selected->GetActorRotation();
+	target.Z += 30;
 	if (!Src) {
 		Src = selected;
-		SetBoneAnglesIK(Src->GetActorLocation());
+		AddPathNode(target, orientation);
 		return;
 	}
 
-	Dst = selected;
-	SetBoneAnglesIK(Dst->GetActorLocation());
+	// Compute intermediate for shortest path interpolation
+	AddPathNode((Src->GetActorLocation() + target) / 2, (Src->GetActorRotation() + orientation) * 0.5);
 
+	// Final node
+	Dst = selected;
+	AddPathNode(target, orientation);
+
+	// Remove selection listener
 	AMyCharacter* character = Cast<AMyCharacter>(
 		UGameplayStatics::GetPlayerCharacter(GetWorld(), 0));
 	character->RemoveSelectListener(this);
 	character->SetActionMode(1);
 }
 
-bool ARobotArm::SetBoneAnglesIK(const FVector& target, float range) {
+bool ARobotArm::AddPathNode(const FVector& target, const FRotator &orientation) {
 	//*
-	TArray<float> angles;
 
-	TArray<FTransform> transforms;
 	UPoseableMeshComponent* armMesh = Cast<UPoseableMeshComponent>(RootComponent);
 	if (!armMesh) {
 		UE_LOG(LogTemp, Error, TEXT("Could not find skeletal mesh."));
 		return false;
 	}
 
-	if (BoneAxes[0] != Axe::Z) {
-		UE_LOG(LogTemp, Error, TEXT("Base must be able to rotate around Z axis"));
-		return false;
-	}
-
-	for (int idx : BoneIndices) {
-		transforms.Add(armMesh->GetBoneTransform(idx));
-		angles.Add(0.0f);
-	}
-
+	const FVector actorLocation = GetActorLocation();
 	const FName baseName = armMesh->GetBoneName(BoneIndices[0]);
-	const FName effectorName = armMesh->GetBoneName(BoneIndices.Last());
-	const EBoneSpaces::Type space = EBoneSpaces::ComponentSpace;
-
-	// Align base toward target
-	FVector targetVec = target - armMesh->GetBoneLocationByName(baseName, EBoneSpaces::WorldSpace);
-	FVector fwdVec = GetActorForwardVector();
-	float angle = acos(targetVec.CosineAngle2D(fwdVec)) * (180 / PI);
-	if (FVector::CrossProduct(fwdVec, targetVec).Z < 0)
-		angle = -angle;
-
-
-	FRotator baseRot = armMesh->GetBoneRotationByName(baseName, space);
-	baseRot.Yaw = angle;
-	armMesh->SetBoneRotationByName("Sphere", baseRot, space);
-
-	//FRotator botRot(armMesh->GetBoneRotationByName("Middle", EBoneSpaces::Type::ComponentSpace));
-	//botRot.Pitch += 45;
-	//armMesh->SetBoneRotationByName("Middle", botRot, EBoneSpaces::Type::ComponentSpace);
-	
-
-	FVector targetBS;
-	//targetBS.Z += 10; // Temp fix not to stick arm into belt
-
-	FRotator targetRot;
-	armMesh->TransformToBoneSpace("Bottom", target, FRotator(), targetBS, targetRot);
-	//targetBS.Y = 0;
-
-	UE_LOG(LogTemp, Warning, TEXT("TARGET = %s"), *targetBS.ToString());
+	const EBoneSpaces::Type localSpace = EBoneSpaces::ComponentSpace;
+	const FVector armBasePos = armMesh->GetBoneLocationByName(baseName, EBoneSpaces::WorldSpace);
 
 	TArray<FName> names;
-	for (size_t i = 1; i < BoneIndices.Num() - 1; ++i)
+	for (size_t i = 1; i < BoneIndices.Num(); ++i)
 		names.Add(armMesh->GetBoneName(BoneIndices[i]));
 
-	for (int i = names.Num() - 1; i >= 0; --i) {
-		const FName &boneName = names[i];
-		const FVector effectorPos = armMesh->GetBoneLocationByName(effectorName, space);
-		const FVector jointPos = armMesh->GetBoneLocationByName(boneName, space);
+	const float armLength = FVector::Distance(
+		armMesh->GetBoneLocationByName(names[0], localSpace),
+		armMesh->GetBoneLocationByName(names[1], localSpace)
+	);
+	const float dist = FVector::Distance(
+		armBasePos,
+		target
+	);
 
-//		UE_LOG(LogTemp, Warning, TEXT("BonePos: %s"), *jointPos.ToString());
-		const FVector v1 = effectorPos - jointPos;
-		const FVector v2 = targetBS - jointPos;
-		UE_LOG(LogTemp, Warning, TEXT("%s, j = %s"), *boneName.ToString(), *jointPos.ToString());
-		//UE_LOG(LogTemp, Warning, TEXT("v1 = %s v2 = %s"), *v1.ToString(), *v2.ToString());
-		const float dot = FVector::DotProduct(v1, v2);
-		const float sizesProd = v1.Size() * v2.Size();
-		float angle = acos(dot / sizesProd) * (180 / PI);
+	// Target cannot be reached
+	if (dist > 3 * armLength)
+		return false;
 
-		FVector CP = FVector::CrossProduct(v1, v2);
-		//UE_LOG(LogTemp, Warning, TEXT("Angle = %f, CP = %s"), angle, *CP.ToString());
-		//if (FVector::CrossProduct(v1, v2).Y < 0)
-		//	angle = -angle;
+	// Compute angle to orient arm toward target
+	// Init vectors
+	FVector targetV = target - actorLocation;
+	targetV.Normalize();
+	const FVector rightV = GetActorRightVector();
 
-		FRotator rotation = armMesh->GetBoneRotationByName(boneName, space);
-		rotation.Pitch = angle;
-		armMesh->SetBoneRotationByName(boneName, rotation, space);
+	// Compute angle in degrees
+	float angle = acos(targetV.CosineAngle2D(rightV)) * 180.f / PI;
+	if (FVector::CrossProduct(targetV, rightV).Z > 0)
+		angle = -angle;
+
+	FRotator baseRot = armMesh->GetBoneRotationByName(baseName, localSpace);
+	baseRot.Yaw = angle;
+	armMesh->SetBoneRotationByName(baseName, baseRot, localSpace);
+
+	// Compute joints angle
+	const float heightDiff = target.Z - armBasePos.Z;
+	float outerAngle = -atan(heightDiff / dist) * (180.f / PI);
+
+	float innerAngle;
+	const float term = (dist - armLength) / (-2 * armLength);
+	if (dist <= armLength)
+		innerAngle = acos(term);
+	else
+		innerAngle = asin(-term);
+	
+	innerAngle = (innerAngle * 180.f / PI) + 90.f;
+	outerAngle += 90.f - (180.f - innerAngle);
+
+	// Apply rotations
+	const float angles[5] = {
+		outerAngle,
+		outerAngle + 180 - innerAngle,
+		outerAngle + 2 * (180 - innerAngle),
+		-90,
+		orientation.Yaw
+	};
+
+	const EAxis::Type axes[5] = {
+		EAxis::X,
+		EAxis::X,
+		EAxis::X,
+		EAxis::Y,
+		EAxis::Z
+	};
+
+	float acc = 0;
+	for (size_t i = 0; i < 5; ++i) {
+		FRotator rotation = armMesh->GetBoneRotationByName(names[i], localSpace);
+		rotation.SetComponentForAxis(axes[i], angles[i]);
+		rotation.Normalize();
+		armMesh->SetBoneRotationByName(names[i], rotation, localSpace);
 	}
+
 	return true;
 }

@@ -168,8 +168,8 @@ void AMyCharacter::Hit()
 			UObject* SpawnActor = Cast<UObject>(
 				StaticLoadObject(UObject::StaticClass(), NULL, *m_ghostBlueprintResName));
 			UBlueprint* GeneratedBP = Cast<UBlueprint>(SpawnActor);
-			FVector loc = m_ghost->GetActorLocation();
-			FRotator rot = m_ghost->GetActorRotation();
+			const FVector loc = m_ghost->GetActorLocation();
+			const FRotator rot = m_ghost->GetActorRotation();
 			UWorld* World = GetWorld();
 			FActorSpawnParameters SpawnParams;
 			SpawnParams.Owner = this;
@@ -223,6 +223,7 @@ void AMyCharacter::SetActionMode(int mode) {
 		m_ghost->Destroy();
 		m_ghost = NULL;
 	}
+	m_listeners.Empty();
 
 	switch (mode) {
 	case -1:
@@ -236,7 +237,7 @@ void AMyCharacter::SetActionMode(int mode) {
 		break;
 	case 3:
 		SetGhost(TEXT("StaticMesh'/Game/Assets/Belt/belt_straight.belt_straight'"));
-		m_ghostBlueprintResName = TEXT("Blueprint'/Game/Actors/Belt.Belt'");
+		m_ghostBlueprintResName = TEXT("Blueprint'/Game/Actors/Belt_BP.Belt_BP'");
 		m_actionMode = SPAWN_OBJECT;
 		break;
 	case 4:

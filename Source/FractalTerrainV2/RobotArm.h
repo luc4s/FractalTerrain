@@ -29,7 +29,6 @@ protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
 
-
 public:	
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
@@ -37,18 +36,26 @@ public:
 	virtual void OnSelect(AActor* selected) override;
 
 	UFUNCTION(BlueprintNativeEvent, Category = "RobotArm")
-	void GetBones(TArray<int> &indices, TArray<Axe> &axes);
-	void GetBones_Implementation(TArray<int>& indices, TArray<Axe>& axes) {};
+	void GetBones(TArray<int> &indices);
+	void GetBones_Implementation(TArray<int>& indices) {};
 
+	/**
+		Add a node to this arm path.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "RobotArm")
-	bool SetBoneAnglesIK(const FVector& target, float range = 10);
+	bool AddPathNode(const FVector& target, const FRotator& orientation);
 
+	/**
+		Put the arm in setup mode.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "RobotArm")
 	void SetSettingUp(bool value);
 
-	TArray<Axe> BoneAxes;
 	TArray<int> BoneIndices;
 
 	AActor* Src;
 	AActor* Dst;
+
+	size_t CurrentNode;
+	TArray<TArray<float>> PathNodes;
 };
