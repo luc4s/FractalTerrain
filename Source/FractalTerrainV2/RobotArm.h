@@ -6,8 +6,12 @@
 #include "GameFramework/Actor.h"
 #include "MyCharacter.h"
 
+#include "Components/TimelineComponent.h"
+
 #include "RobotArm.generated.h"
 
+
+class UCurveFloat;
 
 UENUM(BlueprintType)
 enum class Axe : uint8 {
@@ -28,6 +32,13 @@ public:
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
+
+private:
+	UFUNCTION()
+	void HandleProgress(float Value);
+
+	UFUNCTION()
+	void HandleTimelineEnd();
 
 public:	
 	// Called every frame
@@ -51,11 +62,20 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "RobotArm")
 	void SetSettingUp(bool value);
 
+	UFUNCTION(BlueprintImplementableEvent, Category = "RobotArm")
+	UObject* GetRessource(FName name);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RobotArm")
+	UCurveFloat* curve;
+
+	FTimeline Timeline;
+
 	TArray<int> BoneIndices;
+	TArray<FName> BoneNames;
+	EAxis::Type BoneAxes[6];
 
 	AActor* Src;
 	AActor* Dst;
 
-	size_t CurrentNode;
-	TArray<TArray<float>> PathNodes;
+	TArray< TArray<float> > PathNodes;
 };

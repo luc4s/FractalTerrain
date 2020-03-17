@@ -223,10 +223,9 @@ void AMyCharacter::SetActionMode(int mode) {
 		m_ghost->Destroy();
 		m_ghost = NULL;
 	}
-	m_listeners.Empty();
-
 	switch (mode) {
 	case -1:
+		m_listenersToRemove.Append(m_listeners);
 		m_selected = NULL;
 		m_actionMode = SELECT_OBJECT;
 		break;
