@@ -5,6 +5,7 @@
 #include "Kismet/GameplayStatics.h"
 
 #include "Components/PoseableMeshComponent.h"
+#include "Components/SphereComponent.h"
 
 #include <cmath>
 
@@ -19,7 +20,8 @@ ARobotArm::ARobotArm() :
 		EAxis::X,
 		EAxis::Y,
 		EAxis::Z
-	}
+	},
+	ArmSpeed(50)
 {
  	// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
@@ -57,26 +59,48 @@ void ARobotArm::SetSettingUp(bool value) {
 }
 
 void ARobotArm::OnSelect(AActor *selected) {
-	if (!selected->ActorHasTag("Belt"))
+	if (!selected->ActorHasTag("ArmCanPick"))
 		return;
 
-	FVector target = selected->GetActorLocation();
-	target.Z += 30;
-	FRotator orientation = selected->GetActorRotation();
+	const USphereComponent* pickUpSlot = Cast<USphereComponent>(
+		selected->GetComponentsByTag(USphereComponent::StaticClass(), "PickUpLoc")[0]);
+	const FVector pickUpLoc = pickUpSlot->GetComponentLocation();
+	const FRotator pickUpRot = pickUpSlot->GetComponentRotation();
+	
+	const USphereComponent* waitSlot = Cast<USphereComponent>(
+		selected->GetComponentsByTag(USphereComponent::StaticClass(), "WaitLoc")[0]);
+	const FVector waitLoc = waitSlot->GetComponentLocation();
+	const FRotator waitRot = waitSlot->GetComponentRotation();
+
 	if (!Src) {
-		Src = selected;
-		AddPathNode(target, orientation);
-		target.Z += 30; // TODO: Remove this offset and handle target position properly
-		AddPathNode(target, orientation);
+		if (AddPathNode(pickUpLoc, pickUpRot)) {
+			if (AddPathNode(waitLoc, waitRot))
+				Src = selected;
+			else
+				PopPathNode();
+		}
 		return;
 	}
 
-	// Final node
-	Dst = selected;
-	target.Z += 30; // TODO: Remove this offset and handle target position properly
-	AddPathNode(target, orientation);
-	target.Z -= 30;
-	AddPathNode(target, orientation);
+	// Source and Destination canot be the same
+	if (selected == Src)
+		return;
+
+	// Dest
+	if (!Dst) {
+		if (AddPathNode(waitLoc, pickUpRot)) {
+			if (AddPathNode(pickUpLoc, waitRot))
+				Dst = selected;
+			else
+				PopPathNode();
+		}
+	}
+
+	// Adjust arm speed depending on distance
+	// TODO: Improve this as it looks weird
+	const float dist = FVector::Dist(Src->GetActorLocation(), Dst->GetActorLocation());
+	const float rate = ArmSpeed / dist;
+	Timeline.SetPlayRate(rate);
 
 	// Remove selection listener
 	AMyCharacter* character = Cast<AMyCharacter>(
@@ -102,18 +126,24 @@ void ARobotArm::OnSelect(AActor *selected) {
 	Timeline.PlayFromStart();
 }
 
-bool ARobotArm::AddPathNode(const FVector& target, const FRotator &orientation) {
+bool ARobotArm::AddPathNode(const FVector& actualTarget, const FRotator &orientation) {
 	UPoseableMeshComponent* armMesh = Cast<UPoseableMeshComponent>(RootComponent);
 
 	const FVector actorLocation = GetActorLocation();
 	const FName baseName = BoneNames[0];
 	const EBoneSpaces::Type localSpace = EBoneSpaces::ComponentSpace;
-	const FVector armBasePos = armMesh->GetBoneLocationByName(baseName, EBoneSpaces::WorldSpace);
+	const EBoneSpaces::Type worldSpace = EBoneSpaces::WorldSpace;
+	const FVector armBasePos = armMesh->GetBoneLocationByName(baseName, worldSpace);
 
 	const float armLength = FVector::Distance(
 		armMesh->GetBoneLocationByName(BoneNames[1], localSpace),
 		armMesh->GetBoneLocationByName(BoneNames[2], localSpace)
 	);
+
+	// Adjuste target to take arm effector offset into account
+	FVector offset = armMesh->GetBoneLocation(EffectorBoneName, worldSpace) - armMesh->GetBoneLocation(BoneNames[5], worldSpace);
+	FVector target = actualTarget;
+	target.Z += abs(offset.Z);
 	const float dist = FVector::Distance(
 		armBasePos,
 		target
@@ -134,22 +164,24 @@ bool ARobotArm::AddPathNode(const FVector& target, const FRotator &orientation) 
 	if (FVector::CrossProduct(targetV, rightV).Z > 0)
 		angle = -angle;
 
+	float headOrientation = orientation.Yaw;
 	if (PathNodes.Num() > 0) {
-		float lastAngle = PathNodes[PathNodes.Num() - 1][0];
-		float diff = abs(angle - lastAngle);
-		if (abs(angle + 360 - lastAngle) < diff)
-			angle += 360;
-		else if (abs(angle - 360 - lastAngle) < diff)
-			angle -= 360;
+		const float lastBaseAngle = PathNodes[PathNodes.Num() - 1][0];
+		ShortestAngle(lastBaseAngle, angle);
+
+		const float lastHeadAngle = PathNodes[PathNodes.Num() - 1][5];
+		ShortestAngle(lastHeadAngle, headOrientation);
 	}
 	FRotator baseRot = armMesh->GetBoneRotationByName(baseName, localSpace);
 	baseRot.Yaw = angle;
 	armMesh->SetBoneRotationByName(baseName, baseRot, localSpace);
 
 	// Compute joints angle
+	// Height difference
 	const float heightDiff = target.Z - armBasePos.Z;
 	float outerAngle = -atan(heightDiff / dist) * (180.f / PI);
 
+	// Inner and outer angles (of trapezoid)
 	float innerAngle;
 	const float term = (dist - armLength) / (-2 * armLength);
 	if (dist <= armLength)
@@ -160,15 +192,16 @@ bool ARobotArm::AddPathNode(const FVector& target, const FRotator &orientation) 
 	innerAngle = (innerAngle * 180.f / PI) + 90.f;
 	outerAngle += 90.f - (180.f - innerAngle);
 
-	// Apply rotations
+	// Create node
 	const TArray<float> angles({
 		angle,
 		outerAngle,
 		outerAngle + 180 - innerAngle,
 		outerAngle + 2 * (180 - innerAngle),
 		-90,
-		orientation.Yaw
+		headOrientation
 	});
+	PathNodes.Add(angles);
 
 	for (size_t i = 1; i < 6; ++i) {
 		FRotator rotation = armMesh->GetBoneRotationByName(BoneNames[i], localSpace);
@@ -177,7 +210,6 @@ bool ARobotArm::AddPathNode(const FVector& target, const FRotator &orientation) 
 		armMesh->SetBoneRotationByName(BoneNames[i], rotation, localSpace);
 	}
 
-	PathNodes.Add(angles);
 	return true;
 }
 
@@ -187,35 +219,27 @@ void ARobotArm::HandleProgress(float Value) {
 	const float progress = Value / stateTime;
 	const size_t currentState = progress;
 	const size_t nextState = currentState + 1;
-	if (nextState >= PathNodes.Num())
+	if (nextState > stateCount)
 		return;
 
 	const float interp = (progress - currentState);
-	UE_LOG(LogTemp, Warning, TEXT("%f"), interp);
 
 	UPoseableMeshComponent* arm = Cast<UPoseableMeshComponent>(RootComponent);
 	for (size_t i = 0; i < BoneNames.Num(); ++i) {
 		const float s0 = PathNodes[currentState][i];
 		const float s1 = PathNodes[nextState][i];
 		const float angle = s0 * (1 - interp) + s1 * interp;
-		//if (i == 1)
-		//	UE_LOG(LogTemp, Warning, TEXT("[%f;%f] = %f"), s0, s1, angle);
 
 		FRotator rotation = arm->GetBoneRotationByName(BoneNames[i], EBoneSpaces::ComponentSpace);
 		rotation.SetComponentForAxis(BoneAxes[i], angle);
-		//rotation.Normalize();
 		arm->SetBoneRotationByName(BoneNames[i], rotation, EBoneSpaces::ComponentSpace);
 	}
 }
 
 void ARobotArm::HandleTimelineEnd() {
-	static bool reverse = false;
-	if (reverse) {
+	const float playbackPos = Timeline.GetPlaybackPosition();
+	if (playbackPos == curve->GetFloatValue(0))
 		Timeline.PlayFromStart();
-		reverse = false;
-	}
-	else {
+	else 
 		Timeline.ReverseFromEnd();
-		reverse = true;
-	}
 }

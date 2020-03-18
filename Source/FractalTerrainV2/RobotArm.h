@@ -40,6 +40,17 @@ private:
 	UFUNCTION()
 	void HandleTimelineEnd();
 
+	/**
+		Calculates end angle to minimize travel distance.
+	 */
+	void ShortestAngle(float startAngle, float& endAngle) const {
+		float diff = abs(endAngle - startAngle);
+		if (abs(endAngle + 360 - startAngle) < diff)
+			endAngle += 360;
+		else if (abs(endAngle - 360 - startAngle) < diff)
+			endAngle -= 360;
+	}
+
 public:	
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
@@ -57,6 +68,13 @@ public:
 	bool AddPathNode(const FVector& target, const FRotator& orientation);
 
 	/**
+		Removes last added path node.
+	 */
+	void PopPathNode() {
+		if (PathNodes.Num() > 0)
+			PathNodes.Pop();
+	}
+	/**
 		Put the arm in setup mode.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "RobotArm")
@@ -64,6 +82,12 @@ public:
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "RobotArm")
 	UObject* GetRessource(FName name);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RobotArm")
+	float ArmSpeed;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RobotArm")
+	FName EffectorBoneName;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RobotArm")
 	UCurveFloat* curve;
