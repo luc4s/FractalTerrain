@@ -34,6 +34,12 @@ protected:
 	virtual void BeginPlay() override;
 
 private:
+	enum GripAction {
+		NOTHING,
+		OPEN,
+		CLOSE
+	};
+
 	UFUNCTION()
 	void HandleProgress(float Value);
 
@@ -57,6 +63,26 @@ public:
 
 	virtual void OnSelect(AActor* selected) override;
 
+	/**
+		Callbacks for timeline events
+	*/
+	UFUNCTION()
+	void HandleTryPick();
+	UFUNCTION()
+	void HandleTryDrop();
+	UFUNCTION(BlueprintImplementableEvent, Category = "RobotArm")
+	void OnPick();
+	UFUNCTION(BlueprintImplementableEvent, Category = "RobotArm")
+	void OnDrop();
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "RobotArm")
+	bool ReadyToPick();
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "RobotArm")
+	bool ReadyToDrop();
+
+
+
 	UFUNCTION(BlueprintNativeEvent, Category = "RobotArm")
 	void GetBones(TArray<int> &indices);
 	void GetBones_Implementation(TArray<int>& indices) {};
@@ -64,8 +90,7 @@ public:
 	/**
 		Add a node to this arm path.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "RobotArm")
-	bool AddPathNode(const FVector& target, const FRotator& orientation);
+	bool AddPathNode(const FVector& target, const FRotator& orientation, GripAction gripAction);
 
 	/**
 		Removes last added path node.
@@ -92,14 +117,20 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RobotArm")
 	UCurveFloat* curve;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RobotArm")
+	AActor* Src;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RobotArm")
+	AActor* Dst;
+
 	FTimeline Timeline;
+
+	bool WaitDrop;
+	bool WaitPick;
 
 	TArray<int> BoneIndices;
 	TArray<FName> BoneNames;
 	EAxis::Type BoneAxes[6];
-
-	AActor* Src;
-	AActor* Dst;
 
 	TArray< TArray<float> > PathNodes;
 };

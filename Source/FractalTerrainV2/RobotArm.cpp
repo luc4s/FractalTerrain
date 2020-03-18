@@ -21,7 +21,9 @@ ARobotArm::ARobotArm() :
 		EAxis::Y,
 		EAxis::Z
 	},
-	ArmSpeed(50)
+	ArmSpeed(50),
+	WaitDrop(false),
+	WaitPick(false)
 {
  	// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
@@ -37,7 +39,13 @@ void ARobotArm::BeginPlay()
 // Called every frame
 void ARobotArm::Tick(float DeltaTime) {
 	Super::Tick(DeltaTime);
-	Timeline.TickTimeline(DeltaTime);
+
+	if (WaitDrop)
+		HandleTryDrop();
+	else if (WaitPick)
+		HandleTryPick();
+	else 
+		Timeline.TickTimeline(DeltaTime);
 }
 
 void ARobotArm::SetSettingUp(bool value) {
@@ -73,10 +81,12 @@ void ARobotArm::OnSelect(AActor *selected) {
 	const FRotator waitRot = waitSlot->GetComponentRotation();
 
 	if (!Src) {
-		if (AddPathNode(pickUpLoc, pickUpRot)) {
-			if (AddPathNode(waitLoc, waitRot))
+		// Grip open by default
+		if (AddPathNode(waitLoc, waitRot, OPEN)) {
+			if (AddPathNode(pickUpLoc, pickUpRot, CLOSE)) {
 				Src = selected;
-			else
+				AddPathNode(waitLoc, waitRot, CLOSE);
+			} else
 				PopPathNode();
 		}
 		return;
@@ -88,16 +98,17 @@ void ARobotArm::OnSelect(AActor *selected) {
 
 	// Dest
 	if (!Dst) {
-		if (AddPathNode(waitLoc, pickUpRot)) {
-			if (AddPathNode(pickUpLoc, waitRot))
+		if (AddPathNode(waitLoc, waitRot, CLOSE)) {
+			if (AddPathNode(pickUpLoc, pickUpRot, OPEN)) {
 				Dst = selected;
-			else
+				AddPathNode(waitLoc, waitRot, OPEN);
+			} else
 				PopPathNode();
 		}
 	}
 
 	// Adjust arm speed depending on distance
-	// TODO: Improve this as it looks weird
+	// TODO: Improve this as it looks weird currently
 	const float dist = FVector::Dist(Src->GetActorLocation(), Dst->GetActorLocation());
 	const float rate = ArmSpeed / dist;
 	Timeline.SetPlayRate(rate);
@@ -115,18 +126,33 @@ void ARobotArm::OnSelect(AActor *selected) {
 	}
 
 	FOnTimelineFloat onProgressCallback;
+	FOnTimelineEvent onPickCallback;
+	FOnTimelineEvent onDropCallback;
+	FOnTimelineEvent onTryPickCallback;
+	FOnTimelineEvent onTryDropCallback;
+
 	FOnTimelineEventStatic onTimelineFinishedCallback;
 
 	onProgressCallback.BindUFunction(this, FName("HandleProgress"));
 	onTimelineFinishedCallback.BindUFunction(this, FName("HandleTimelineEnd"));
+	onPickCallback.BindUFunction(this, FName("OnPick"));
+	onDropCallback.BindUFunction(this, FName("OnDrop"));
+	onTryPickCallback.BindUFunction(this, FName("HandleTryPick"));
+	onTryDropCallback.BindUFunction(this, FName("HandleTryDrop"));
+
+	Timeline.AddEvent(1.f / 6, onPickCallback);
+	Timeline.AddEvent(4.f / 6, onDropCallback);
+
+	Timeline.AddEvent(0, onTryPickCallback);
+	Timeline.AddEvent(3.f / 6, onTryDropCallback);
 
 	Timeline.AddInterpFloat(curve, onProgressCallback);
 	Timeline.SetTimelineFinishedFunc(onTimelineFinishedCallback);
-	Timeline.SetLooping(false);
+	Timeline.SetLooping(true);
 	Timeline.PlayFromStart();
 }
 
-bool ARobotArm::AddPathNode(const FVector& actualTarget, const FRotator &orientation) {
+bool ARobotArm::AddPathNode(const FVector& actualTarget, const FRotator &orientation, GripAction gripAction) {
 	UPoseableMeshComponent* armMesh = Cast<UPoseableMeshComponent>(RootComponent);
 
 	const FVector actorLocation = GetActorLocation();
@@ -214,17 +240,15 @@ bool ARobotArm::AddPathNode(const FVector& actualTarget, const FRotator &orienta
 }
 
 void ARobotArm::HandleProgress(float Value) {
-	const size_t stateCount = PathNodes.Num() - 1;
+	const size_t stateCount = PathNodes.Num();
 	const float stateTime = 1.f / stateCount;
 	const float progress = Value / stateTime;
-	const size_t currentState = progress;
-	const size_t nextState = currentState + 1;
-	if (nextState > stateCount)
-		return;
+	const size_t currentState = ((size_t)progress) % stateCount;
+	const size_t nextState = (currentState + 1) % stateCount;
 
 	const float interp = (progress - currentState);
-
 	UPoseableMeshComponent* arm = Cast<UPoseableMeshComponent>(RootComponent);
+
 	for (size_t i = 0; i < BoneNames.Num(); ++i) {
 		const float s0 = PathNodes[currentState][i];
 		const float s1 = PathNodes[nextState][i];
@@ -236,10 +260,20 @@ void ARobotArm::HandleProgress(float Value) {
 	}
 }
 
+void ARobotArm::HandleTryPick() {
+	WaitPick = !ReadyToPick();
+}
+
+void ARobotArm::HandleTryDrop() {
+	WaitDrop = !ReadyToDrop();
+}
+
 void ARobotArm::HandleTimelineEnd() {
+	/*
 	const float playbackPos = Timeline.GetPlaybackPosition();
 	if (playbackPos == curve->GetFloatValue(0))
 		Timeline.PlayFromStart();
 	else 
 		Timeline.ReverseFromEnd();
+	*/
 }
